@@ -1,6 +1,5 @@
-# OmniRoute
+# OmniRoute Docker Compose Configuration
 
-### Docker Compose Configuration
 
 ```yaml
 x-common:
