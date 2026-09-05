@@ -1,1 +1,163 @@
 # Omniroute
+
+### Docker Compose Configuration
+
+```yaml
+x-common:
+  restart: unless-stopped
+  stop_grace_period: 40s
+  env_file: .env
+  environment:
+    - DATA_DIR=/app/data
+    - 'PORT=${PORT:-20128}'
+    - 'DASHBOARD_PORT=${DASHBOARD_PORT:-20128}'
+    - 'API_PORT=${API_PORT:-20129}'
+    - 'API_HOST=${API_HOST:-0.0.0.0}'
+    - 'REDIS_URL=${REDIS_URL:-redis://redis:6379}'
+  volumes:
+    - 'omniroute-data:/app/data'
+
+services:
+  redis:
+    image: 'docker.io/library/redis:latest'
+    restart: unless-stopped
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - 'redis-data:/data'
+    command: 'redis-server --save 60 1 --loglevel warning'
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  patchright-installer:
+    image: 'diegosouzapw/omniroute:latest'
+    restart: 'no'
+    user: root
+    environment:
+      - PLAYWRIGHT_BROWSERS_PATH=/app/browsers
+    volumes:
+      - 'browser-data:/app/browsers'
+    command: "sh -c \"echo 'Checking browser...' && npm install patchright --no-save --legacy-peer-deps && npx patchright install-deps && npx patchright install chromium && chown -R 1000:1000 /app/browsers && chmod -R 777 /app/browsers && echo 'Done!'\"\n"
+    profiles:
+      - web
+
+  omniroute-web:
+    restart: unless-stopped
+    stop_grace_period: 40s
+    env_file: .env
+    environment:
+      - DATA_DIR=/app/data
+      - 'PORT=${PORT:-20128}'
+      - 'DASHBOARD_PORT=${DASHBOARD_PORT:-20128}'
+      - 'API_PORT=${API_PORT:-20129}'
+      - 'API_HOST=${API_HOST:-0.0.0.0}'
+      - CLI_MODE=enable
+      - PLAYWRIGHT_BROWSERS_PATH=/app/browsers
+    volumes:
+      - 'omniroute-data:/app/data'
+      - 'browser-data:/app/browsers'
+    image: 'diegosouzapw/omniroute:latest'
+    ports:
+      - '${DASHBOARD_PORT:-20128}:${DASHBOARD_PORT:-20128}'
+      - '${API_PORT:-20129}:${API_PORT:-20129}'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - healthcheck.mjs
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    profiles:
+      - web
+
+  qdrant:
+    image: 'docker.io/qdrant/qdrant:latest'
+    restart: unless-stopped
+    ports:
+      - '${QDRANT_PORT:-6333}:6333'
+      - '${QDRANT_GRPC_PORT:-6334}:6334'
+    volumes:
+      - 'qdrant-data:/qdrant/storage'
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'curl -s [http://127.0.0.1:6333/readyz](http://127.0.0.1:6333/readyz) > /dev/null || exit 0'
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    profiles:
+      - memory
+
+  bifrost:
+    image: 'maximhq/bifrost:v2.0.0-prerelease1-ubi9'
+    restart: unless-stopped
+    ports:
+      - '${BIFROST_PORT:-8081}:8080'
+    volumes:
+      - 'bifrost-data:/data'
+    environment:
+      - 'BIFROST_LOG_LEVEL=${BIFROST_LOG_LEVEL:-info}'
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'curl -s [http://127.0.0.1:8080/v1/models](http://127.0.0.1:8080/v1/models) > /dev/null || exit 0'
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    profiles:
+      - bifrost
+
+  cliproxyapi:
+    image: 'eceasy/cli-proxy-api:v7.2.66'
+    restart: unless-stopped
+    ports:
+      - '${CLIPROXYAPI_PORT:-8317}:${CLIPROXYAPI_PORT:-8317}'
+    volumes:
+      - 'cliproxyapi-data:/root/.cli-proxy-api'
+    configs:
+      - source: cliproxyapi_config
+        target: /CLIProxyAPI/config.yaml
+    environment:
+      - 'PORT=${CLIPROXYAPI_PORT:-8317}'
+      - HOST=0.0.0.0
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'wget -q -O /dev/null [http://127.0.0.1](http://127.0.0.1):${CLIPROXYAPI_PORT:-8317}/v1/models || exit 0'
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    profiles:
+      - cliproxyapi
+
+volumes:
+  cliproxyapi-data:
+    name: cliproxyapi-data
+  redis-data:
+    name: omniroute-redis-data
+  qdrant-data:
+    name: omniroute-qdrant-data
+  bifrost-data:
+    name: omniroute-bifrost-data
+  omniroute-data:
+    name: omniroute-data
+  browser-data:
+    name: omniroute-browser-data
+
+configs:
+  cliproxyapi_config:
+    content: "host: \"0.0.0.0\"\nport: 8317\n"
+```
